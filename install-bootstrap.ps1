@@ -50,7 +50,9 @@ Write-Host "[NexGenX] Downloading installer from $installUrl..." -ForegroundColo
 $installer = "$env:TEMP\ngx-install.ps1"
 
 try {
-    Invoke-WebRequest -Uri $installUrl -OutFile $installer -UseBasicParsing -TimeoutSec 60
+    # Use -DisableKeepAlive to avoid PowerShell's per-process HTTP cache, which
+    # can serve a stale version of the file even when GitHub has been updated.
+    Invoke-WebRequest -Uri $installUrl -OutFile $installer -UseBasicParsing -TimeoutSec 60 -DisableKeepAlive
     $downloadedBytes = (Get-Item $installer).Length
     if ($downloadedBytes -lt 1000) {
         throw "Downloaded file is too small ($downloadedBytes bytes) — likely a 404 page"

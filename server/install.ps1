@@ -146,7 +146,9 @@ $sourceZip = "$env:TEMP\ngx-agent.zip"
 
 Write-Step "Downloading from $sourceUrl..."
 try {
-    Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceZip -UseBasicParsing -TimeoutSec 120
+    # -DisableKeepAlive to avoid stale HTTP cache (PowerShell keeps connections
+    # open and can re-serve the same body even when GitHub has updated it)
+    Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceZip -UseBasicParsing -TimeoutSec 120 -DisableKeepAlive
     $actualSize = (Get-Item $sourceZip).Length
     if ($actualSize -lt 1000) {
         Write-Err "Downloaded file is too small ($actualSize bytes). Check that $resolvedVersion is a valid release."
