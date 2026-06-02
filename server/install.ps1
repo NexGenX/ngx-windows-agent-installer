@@ -64,9 +64,12 @@ if (-not $SkipPythonInstall) {
     if (-not $pythonCmd) {
         $test = Get-Command "py" -ErrorAction SilentlyContinue
         if ($test) {
-            # py launcher can find any installed version
-            $pyVer = & py -3 --version 2>&1
-            if ($LASTEXITCODE -eq 0) { $pythonCmd = "py -3" }
+            # py launcher can find any installed version. Test that it actually
+            # runs by checking version. We pin to "py" (not "py -3") because
+            # `& "py -3"` parses -3 as a parameter to the call operator in
+            # some PowerShell versions, which fails.
+            $pyVer = & py --version 2>&1
+            if ($LASTEXITCODE -eq 0) { $pythonCmd = "py" }
         }
     }
 
