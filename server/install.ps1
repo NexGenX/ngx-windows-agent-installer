@@ -1,7 +1,7 @@
 # NexGenX Windows Agent - Install Script (GitHub-Pull Edition)
 #
 # Fetches the latest agent code from GitHub Releases. Customer doesn't need
-# to have the source files locally -- just runs this single script.
+# to have the source files locally — just runs this single script.
 #
 # Usage (as Administrator):
 #   irm https://github.com/NexGenX/ngx-windows-agent/releases/latest/download/install.ps1 -OutFile install.ps1
@@ -23,7 +23,7 @@
 param(
     [string]$InstallPath = "C:\NexGenX",
     [string]$GitHubRepo = "NexGenX/ngx-windows-agent-installer",
-    [string]$Version = "v1.0.0",  # Default to a known release; "latest" resolves to v1.0.0
+    [string]$Version = "latest",  # "latest" or specific version like "v1.0.0"
     [switch]$SkipPythonInstall,
     [switch]$SkipChecksum  # For dev/debug only
 )
@@ -31,16 +31,16 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# ---------- Pretty output ----------
+# ─── Pretty output ─────────────────────────────────────────────────────────────
 function Write-Step    { param([string]$Msg) Write-Host "[NexGenX] $Msg" -ForegroundColor Cyan }
-function Write-Success { param([string]$Msg) Write-Host "[NexGenX] OK $Msg" -ForegroundColor Green }
-function Write-Err     { param([string]$Msg) Write-Host "[NexGenX] [X] ERROR: $Msg" -ForegroundColor Red }
-function Write-Warn    { param([string]$Msg) Write-Host "[NexGenX] [!] $Msg" -ForegroundColor Yellow }
+function Write-Success { param([string]$Msg) Write-Host "[NexGenX] ✓ $Msg" -ForegroundColor Green }
+function Write-Err     { param([string]$Msg) Write-Host "[NexGenX] ✗ ERROR: $Msg" -ForegroundColor Red }
+function Write-Warn    { param([string]$Msg) Write-Host "[NexGenX] ⚠ $Msg" -ForegroundColor Yellow }
 
-# ---------- Admin check ----------
+# ─── Admin check ───────────────────────────────────────────────────────────────
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Write-Err "Please run as Administrator (right-click -> Run as Administrator)"
+    Write-Err "Please run as Administrator (right-click → Run as Administrator)"
     exit 1
 }
 
@@ -52,7 +52,7 @@ Write-Host "  Install path: $InstallPath" -ForegroundColor Gray
 Write-Host "  Version: $Version" -ForegroundColor Gray
 Write-Host ""
 
-# ---------- Python installation ----------
+# ─── Python installation ───────────────────────────────────────────────────────
 if (-not $SkipPythonInstall) {
     Write-Step "Checking for Python..."
 
@@ -64,12 +64,9 @@ if (-not $SkipPythonInstall) {
     if (-not $pythonCmd) {
         $test = Get-Command "py" -ErrorAction SilentlyContinue
         if ($test) {
-            # py launcher can find any installed version. Test that it actually
-            # runs by checking version. We pin to "py" (not "py -3") because
-            # `& "py -3"` parses -3 as a parameter to the call operator in
-            # some PowerShell versions, which fails.
-            $pyVer = & py --version 2>&1
-            if ($LASTEXITCODE -eq 0) { $pythonCmd = "py" }
+            # py launcher can find any installed version
+            $pyVer = & py -3 --version 2>&1
+            if ($LASTEXITCODE -eq 0) { $pythonCmd = "py -3" }
         }
     }
 
@@ -112,7 +109,7 @@ try {
     exit 1
 }
 
-# ---------- Create install directory ----------
+# ─── Create install directory ─────────────────────────────────────────────────
 Write-Step "Creating installation directory: $InstallPath"
 New-Item -ItemType Directory -Force -Path $InstallPath | Out-Null
 if (-not (Test-Path $InstallPath)) {
@@ -120,91 +117,77 @@ if (-not (Test-Path $InstallPath)) {
     exit 1
 }
 
-# ---------- Download agent code from the public installer repo ----------
-# The agent code lives in a SEPARATE private repo, but we ship the public
-# installer with a frozen copy of the agent zip under releases/<version>/.
-# This means:
-#   - Customers don't need GitHub credentials to install
-#   - The public installer repo is the single source of truth for what
-#     version of the agent ships
-#   - We can pin a customer to a specific version (or always-latest)
-#
-# The PublicInstallerRepo parameter can be overridden for private deployments
-# (e.g. air-gapped installs pointing at an internal file share).
+# ─── Download release from GitHub ─────────────────────────────────────────────
+# We always download from THIS public repo's releases/, not the private
+# source repo. That way customers never need a GitHub token.
+Write-Step "Downloading agent from GitHub ($Version)..."
 
-Write-Step "Downloading agent code ($Version)..."
-
-# Default to the public installer repo
-$PublicInstallerRepo = if ($GitHubRepo) { $GitHubRepo } else { "NexGenX/ngx-windows-agent-installer" }
-
-# Map requested version to the actual published version.
-# For now there's only one release shipped; later this would be a lookup.
-$resolvedVersion = if ($Version -eq "latest") { "v1.0.0" } else { $Version }
-$PublishedVersion = "v1.0.0"  # bump this in lockstep with releases/vX.Y.Z/ngx-agent.zip
-
-# Build the public download URL.
-# We download directly from raw.githubusercontent.com (the file's git path)
-# rather than the GitHub Releases API. This is simpler — no releases to
-# manage — and works as long as the file exists at releases/$PublishedVersion/ngx-agent.zip.
-$sourceUrl = "https://raw.githubusercontent.com/$PublicInstallerRepo/main/releases/$PublishedVersion/ngx-agent.zip"
-$sourceZip = "$env:TEMP\ngx-agent.zip"
-
-Write-Step "Downloading from $sourceUrl..."
-try {
-    # -DisableKeepAlive to avoid stale HTTP cache (PowerShell keeps connections
-    # open and can re-serve the same body even when GitHub has updated it)
-    Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceZip -UseBasicParsing -TimeoutSec 120 -DisableKeepAlive
-    $actualSize = (Get-Item $sourceZip).Length
-    if ($actualSize -lt 1000) {
-        Write-Err "Downloaded file is too small ($actualSize bytes). Check that the file exists at $sourceUrl"
-        exit 1
+# If "latest", enumerate the releases dir via the GitHub API
+if ($Version -eq "latest") {
+    try {
+        $rels = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepo/releases" -UseBasicParsing -TimeoutSec 15
+        if ($rels -and $rels.Count -gt 0) {
+            $Version = $rels[0].tag_name
+            Write-Step "Latest release: $Version"
+        } else {
+            $Version = "v1.0.0"  # fallback to first published
+            Write-Warn "No releases found, falling back to $Version"
+        }
+    } catch {
+        $Version = "v1.0.0"
+        Write-Warn "Could not enumerate releases, falling back to $Version"
     }
-    Write-Success "Downloaded $actualSize bytes"
+}
+
+$sourceUrl = "https://github.com/$GitHubRepo/releases/download/$Version/ngx-agent.zip"
+$sourceZip = "$env:TEMP\ngx-agent.zip"
+$hashUrl = "https://github.com/$GitHubRepo/releases/download/$Version/ngx-agent.zip.sha256"
+
+Write-Step "Downloading $sourceUrl..."
+try {
+    Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceZip -UseBasicParsing -TimeoutSec 120
 } catch {
-    Write-Err "Failed to download agent code from $sourceUrl"
-    Write-Err "Error: $_"
-    Write-Warn "If this is a private deployment, set -GitHubRepo to your internal installer host."
+    Write-Err "Failed to download agent: $_"
     exit 1
 }
 
-# Optional SHA-256 verification
-if (-not $SkipChecksum) {
-    $expectedHash = $null
-    $hashUrl = "https://raw.githubusercontent.com/$PublicInstallerRepo/main/releases/$PublishedVersion/ngx-agent.zip.sha256"
-    try {
-        $expectedHash = (Invoke-RestMethod -Uri $hashUrl -UseBasicParsing -TimeoutSec 10 -DisableKeepAlive).Trim().Split(' ')[0]
-        if ($expectedHash -and $expectedHash.Length -eq 64) {
-            Write-Step "Verifying SHA-256 checksum..."
-            $actualHash = (Get-FileHash -Path $sourceZip -Algorithm SHA256).Hash.ToLower()
-            if ($expectedHash -ne $actualHash) {
+# Verify SHA-256 checksum
+try {
+    $expectedHash = (Invoke-RestMethod -Uri $hashUrl -UseBasicParsing -TimeoutSec 10).Trim()
+    if ($expectedHash) {
+        Write-Step "Verifying SHA-256 checksum..."
+        $actualHash = (Get-FileHash -Path $sourceZip -Algorithm SHA256).Hash.ToLower()
+        if ($expectedHash -ne $actualHash) {
+            if ($SkipChecksum) {
+                Write-Warn "Checksum mismatch (--SkipChecksum set): $actualHash vs expected $expectedHash"
+            } else {
                 Write-Err "CHECKSUM VERIFICATION FAILED"
                 Write-Err "Expected: $expectedHash"
                 Write-Err "Actual:   $actualHash"
-                Write-Err "The download may be tampered with. Aborting."
                 exit 1
             }
+        } else {
             Write-Success "Checksum verified"
         }
-    } catch {
-        Write-Warn "No checksum file found at $hashUrl -- skipping verification"
     }
+} catch {
+    Write-Warn "Could not verify checksum (no .sha256 file at $hashUrl)"
 }
 
 # Extract to install directory
 Write-Step "Extracting to $InstallPath..."
 try {
-    # The agent zip is flat (just the server/ contents, no top-level dir)
     Expand-Archive -Path $sourceZip -DestinationPath $InstallPath -Force
     Write-Success "Agent files extracted to $InstallPath"
 } catch {
     Write-Err "Extraction failed: $_"
     exit 1
 } finally {
+    # Clean up the zip (keep the extracted dir)
     Remove-Item $sourceZip -Force -ErrorAction SilentlyContinue
 }
 
-
-# ---------- Install Python dependencies ----------
+# ─── Install Python dependencies ─────────────────────────────────────────────
 Write-Step "Installing Python dependencies..."
 try {
     & $pythonCmd -m pip install --upgrade pip --disable-pip-version-check --quiet 2>&1 | Out-Null
@@ -213,10 +196,10 @@ try {
 } catch {
     Write-Err "Failed to install dependencies: $_"
     Write-Warn "Trying individual install..."
-    & $pythonCmd -m pip install fastapi uvicorn python-multipart pyautogui Pillow numpy mss pystray pyperclip cryptography 2>&1 | Out-Null
+    & $pythonCmd -m pip install fastapi uvicorn python-multipart pyautogui Pillow numpy mss pystray pyperclip cryptography uiautomation pywin32 2>&1 | Out-Null
 }
 
-# ---------- Firewall rule ----------
+# ─── Firewall rule ─────────────────────────────────────────────────────────────
 Write-Step "Configuring Windows Firewall for port 9400..."
 try {
     $ruleName = "NexGenX Agent Server"
@@ -228,7 +211,7 @@ try {
     Write-Warn "Firewall configuration skipped (may require admin or different network profile)"
 }
 
-# ---------- noVNC installation (for browser-based desktop access) ----------
+# ─── noVNC installation (for browser-based desktop access) ────────────────────
 Write-Step "Checking noVNC..."
 $novncPath = "$InstallPath\noVNC"
 if (-not (Test-Path $novncPath)) {
@@ -246,7 +229,7 @@ if (-not (Test-Path $novncPath)) {
     }
 }
 
-# ---------- Configure Windows for remote access ----------
+# ─── Configure Windows for remote access ─────────────────────────────────────
 # CRITICAL: Without this section, the agent installs successfully but
 # you cannot reach the machine. Common failure modes:
 #   - WinRM service not started
@@ -261,7 +244,7 @@ Write-Step "Configuring remote access (WinRM + RDP)..."
 
 $remoteAccessOk = $true
 
-# 1. Enable PSRemoting -- this starts the WinRM service, sets it to auto,
+# 1. Enable PSRemoting — this starts the WinRM service, sets it to auto,
 #    and creates the default firewall rules for HTTP (5985) and HTTPS (5986).
 #    -Force skips the "are you sure" prompts. -SkipNetworkProfileCheck allows
 #    it to work on machines currently classified as "Public" network.
@@ -279,7 +262,7 @@ try {
     $listener = Get-WSManInstance -ResourceURI winrm/config/listener -Enumerate 2>$null |
                 Where-Object { $_.Transport -eq "HTTP" }
     if (-not $listener) {
-        Write-Step "No HTTP WinRM listener found -- creating one..."
+        Write-Step "No HTTP WinRM listener found — creating one..."
         winrm create winrm/config/listener?Address=*+Transport=HTTP
         Restart-Service WinRM -Force
     } else {
@@ -331,13 +314,13 @@ try {
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
         Write-Success "Remote Desktop enabled (port 3389)"
     } else {
-        Write-Step "Server SKU detected -- assuming RDP already enabled"
+        Write-Step "Server SKU detected — assuming RDP already enabled"
     }
 } catch {
     Write-Warn "Could not enable RDP: $($_.Exception.Message)"
 }
 
-# 6. Verify what we set up actually works -- check listening sockets
+# 6. Verify what we set up actually works — check listening sockets
 Start-Sleep 2
 Write-Step "Verifying remote access ports are listening..."
 $listeningPorts = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
@@ -368,52 +351,82 @@ if ($remoteAccessOk) {
     Write-Success "Remote access configured successfully"
 } else {
     Write-Warn "Some remote access features could not be configured."
-    Write-Warn "The agent will still run locally -- manual fix-up may be needed."
+    Write-Warn "The agent will still run locally — manual fix-up may be needed."
 }
 
-# ---------- Start the agent ----------
+# ─── Start the agent ──────────────────────────────────────────────────────────
 
-# ---------- Scheduled task for auto-start ----------
+# ─── Scheduled task for auto-start ─────────────────────────────────────────────
 Write-Step "Creating auto-start scheduled task..."
 $taskName = "NexGenXAgent"
-$pyExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+$pyExe = (Get-Command ($pythonCmd -replace '-3','') -ErrorAction SilentlyContinue).Source
 if (-not $pyExe) {
-    $pyExe = (Get-Command py -ErrorAction SilentlyContinue).Source
+    # Fallback: find python.exe
+    $pyExe = (Get-Command python -ErrorAction SilentlyContinue).Source
 }
 if (-not $pyExe) {
-    Write-Warn "Couldn't locate python.exe path -- scheduled task may not work"
+    Write-Warn "Couldn't locate python.exe path — scheduled task may not work"
 } else {
     try {
-        $taskAction = New-ScheduledTaskAction -Execute $pyExe -Argument "`"$InstallPath\agent_server.py`" --quiet" -WorkingDirectory $InstallPath
-        $taskTrigger = New-ScheduledTaskTrigger -AtStartup
-        $taskPrincipal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
+        # We start the TRAY APP (which spawns the agent server in-process
+        # and shows the access code in a desktop notification). The tray
+        # app must run in the user's interactive session to be visible.
+        $taskAction = New-ScheduledTaskAction -Execute $pyExe -Argument "`"$InstallPath\tray_app.py`" --quiet" -WorkingDirectory $InstallPath
+        # CRITICAL: AtLogOn (not AtStartup) + Interactive logon so the agent
+        # runs in the user's console session (Session 1+), where it can
+        # actually capture the screen and inject input. AtStartup runs in
+        # Session 0 (services session) which has no GDI surface -- screenshots
+        # fail and the agent is effectively useless despite Windows having a
+        # real desktop. Same trap as macOS LaunchDaemon vs LaunchAgent.
+        $taskTrigger = New-ScheduledTaskTrigger -AtLogOn
+        # Use the currently logged-in user (the installer caller). If no user
+        # is logged in, the task still activates on next logon.
+        $currentUser = "$env:USERDOMAIN\$env:USERNAME"
+        $taskPrincipal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Highest
         $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
         $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         if ($existing) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
         Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Description "NexGenX Windows Agent Server v$resolvedVersion" | Out-Null
-        Write-Success "Scheduled task 'NexGenXAgent' created (starts on next boot)"
+        Write-Success "Scheduled task 'NexGenXAgent' created (starts on next user logon)"
     } catch {
         Write-Warn "Scheduled task creation failed: $_"
     }
 }
 
-# ---------- Start the server ----------
+# ─── Start the server ──────────────────────────────────────────────────────────
 Write-Step "Starting NexGenX Agent Server..."
 try {
-    $proc = Start-Process -FilePath $pythonCmd -ArgumentList "`"$InstallPath\agent_server.py`"" -WorkingDirectory $InstallPath -PassThru -WindowStyle Hidden
-    Start-Sleep 3
-    if (-not $proc.HasExited) {
-        Write-Success "Server started (PID: $($proc.Id))"
+    # Start via the scheduled task so the process lands in the user's
+    # interactive console session. Start-Process from this install context
+    # would put it in Session 0 (no display), and screenshots would fail.
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($existingTask) {
+        Start-ScheduledTask -TaskName $taskName
+        Start-Sleep 3
+        $conn = Get-NetTCPConnection -LocalPort 9400 -State Listen -ErrorAction SilentlyContinue
+        if ($conn) {
+            $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+            Write-Success "Server started (PID: $($proc.Id), Session: $($proc.SessionId))"
+        } else {
+            Write-Warn "Scheduled task started but port 9400 not yet listening. Check the tray app."
+        }
     } else {
-        Write-Err "Server exited immediately with code $($proc.ExitCode)"
-        Write-Warn "Check the install log or run $InstallPath\agent_server.py manually to see errors"
+        # Fallback: no scheduled task. Start-Process will land in Session 0.
+        Write-Warn "No scheduled task available -- starting via Start-Process (may be in Session 0)"
+        $proc = Start-Process -FilePath $pythonCmd -ArgumentList "`"$InstallPath\agent_server.py`"" -WorkingDirectory $InstallPath -PassThru -WindowStyle Hidden
+        Start-Sleep 3
+        if (-not $proc.HasExited) {
+            Write-Success "Server started (PID: $($proc.Id))"
+        } else {
+            Write-Err "Server exited immediately with code $($proc.ExitCode)"
+        }
     }
 } catch {
     Write-Err "Failed to start server: $_"
 }
 
-# ---------- Summary ----------
+# ─── Summary ──────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  Installation Complete!" -ForegroundColor Green
 Write-Host "  ======================" -ForegroundColor Green
