@@ -65,8 +65,13 @@ try {
 Write-Host "[NexGenX] Running installer..." -ForegroundColor Cyan
 Write-Host ""
 
-# Execute the real installer
-& $installer -InstallPath $InstallPath -Version $Version
+# Execute the real installer.
+# NOTE: Use -ExecutionPolicy Bypass when invoking the downloaded file because
+# Windows default execution policy may block .ps1 files in the TEMP directory
+# (which is Untrusted by the system zone check). The bootstrap's own
+# `iex (irm ...)` invocation is OK because it runs in-process, but the
+# downloaded file needs its own policy override.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -InstallPath $InstallPath -Version $Version
 
 # Clean up downloaded installer
 Remove-Item $installer -Force -ErrorAction SilentlyContinue
