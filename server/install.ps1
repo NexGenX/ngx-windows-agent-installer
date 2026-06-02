@@ -22,8 +22,8 @@
 [CmdletBinding()]
 param(
     [string]$InstallPath = "C:\NexGenX",
-    [string]$GitHubRepo = "NexGenX/ngx-windows-agent",
-    [string]$Version = "latest",  # "latest" or specific version like "v1.0.0"
+    [string]$GitHubRepo = "NexGenX/ngx-windows-agent-installer",
+    [string]$Version = "v1.0.0",  # Default to a known release; "latest" resolves to v1.0.0
     [switch]$SkipPythonInstall,
     [switch]$SkipChecksum  # For dev/debug only
 )
