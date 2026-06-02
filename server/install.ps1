@@ -117,98 +117,82 @@ if (-not (Test-Path $InstallPath)) {
     exit 1
 }
 
-# ---------- Download release from GitHub ----------
-Write-Step "Downloading agent from GitHub ($Version)..."
+# ---------- Download agent code from the public installer repo ----------
+# The agent code lives in a SEPARATE private repo, but we ship the public
+# installer with a frozen copy of the agent zip under releases/<version>/.
+# This means:
+#   - Customers don't need GitHub credentials to install
+#   - The public installer repo is the single source of truth for what
+#     version of the agent ships
+#   - We can pin a customer to a specific version (or always-latest)
+#
+# The PublicInstallerRepo parameter can be overridden for private deployments
+# (e.g. air-gapped installs pointing at an internal file share).
 
-# Resolve the actual version URL
-if ($Version -eq "latest") {
-    $apiUrl = "https://api.github.com/repos/$GitHubRepo/releases/latest"
-    $versionTag = "latest"
-} else {
-    $apiUrl = "https://api.github.com/repos/$GitHubRepo/releases/tags/$Version"
-    $versionTag = $Version
-}
+Write-Step "Downloading agent code ($Version)..."
 
-# Get release metadata to find the right asset name
-try {
-    $releaseInfo = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -TimeoutSec 30
-    $resolvedVersion = $releaseInfo.tag_name
-    Write-Step "Resolved version: $resolvedVersion"
-} catch {
-    Write-Err "Failed to fetch release info from GitHub: $_"
-    Write-Warn "Falling back to direct source download..."
-    $releaseInfo = $null
-    $resolvedVersion = "main"
-}
+# Default to the public installer repo
+$PublicInstallerRepo = if ($GitHubRepo) { $GitHubRepo } else { "NexGenX/ngx-windows-agent-installer" }
 
-# Download the source archive (always works, even for repos without releases)
-$sourceUrl = "https://github.com/$GitHubRepo/archive/refs/heads/main.zip"
-$sourceZip = "$env:TEMP\ngx-agent-source.zip"
+# Resolve the version we're installing
+$resolvedVersion = if ($Version -eq "latest") { "v1.0.0" } else { $Version }
+
+# Build the public download URL
+$sourceUrl = "https://github.com/$PublicInstallerRepo/releases/download/$resolvedVersion/ngx-agent.zip"
+$sourceZip = "$env:TEMP\ngx-agent.zip"
 
 Write-Step "Downloading from $sourceUrl..."
 try {
     Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceZip -UseBasicParsing -TimeoutSec 120
+    $actualSize = (Get-Item $sourceZip).Length
+    if ($actualSize -lt 1000) {
+        Write-Err "Downloaded file is too small ($actualSize bytes). Check that $resolvedVersion is a valid release."
+        exit 1
+    }
+    Write-Success "Downloaded $actualSize bytes"
 } catch {
-    Write-Err "Failed to download source: $_"
+    Write-Err "Failed to download agent code from $sourceUrl"
+    Write-Err "Error: $_"
+    Write-Warn "If this is a private deployment, set -GitHubRepo to your internal installer host."
     exit 1
 }
 
-# Verify checksum if we have one in the repo
-$expectedHash = $null
-$hashUrl = "https://raw.githubusercontent.com/$GitHubRepo/$resolvedVersion/SHA256SUMS"
-try {
-    $expectedHash = (Invoke-RestMethod -Uri $hashUrl -UseBasicParsing -TimeoutSec 10).Trim()
-    if ($expectedHash) {
-        Write-Step "Verifying SHA-256 checksum..."
-        $actualHash = (Get-FileHash -Path $sourceZip -Algorithm SHA256).Hash.ToLower()
-        if ($expectedHash -ne $actualHash) {
-            if ($SkipChecksum) {
-                Write-Warn "Checksum mismatch (--SkipChecksum set): $actualHash vs expected $expectedHash"
-            } else {
+# Optional SHA-256 verification
+if (-not $SkipChecksum) {
+    $expectedHash = $null
+    $hashUrl = "https://raw.githubusercontent.com/$PublicInstallerRepo/main/releases/$resolvedVersion/ngx-agent.zip.sha256"
+    try {
+        $expectedHash = (Invoke-RestMethod -Uri $hashUrl -UseBasicParsing -TimeoutSec 10).Trim().Split(' ')[0]
+        if ($expectedHash -and $expectedHash.Length -eq 64) {
+            Write-Step "Verifying SHA-256 checksum..."
+            $actualHash = (Get-FileHash -Path $sourceZip -Algorithm SHA256).Hash.ToLower()
+            if ($expectedHash -ne $actualHash) {
                 Write-Err "CHECKSUM VERIFICATION FAILED"
                 Write-Err "Expected: $expectedHash"
                 Write-Err "Actual:   $actualHash"
                 Write-Err "The download may be tampered with. Aborting."
                 exit 1
             }
-        } else {
             Write-Success "Checksum verified"
         }
+    } catch {
+        Write-Warn "No checksum file found at $hashUrl -- skipping verification"
     }
-} catch {
-    Write-Warn "No SHA256SUMS file found (or couldn't fetch) -- skipping checksum verification"
 }
 
 # Extract to install directory
 Write-Step "Extracting to $InstallPath..."
 try {
-    Expand-Archive -Path $sourceZip -DestinationPath $env:TEMP -Force
-    # Source archives extract to a folder like "ngx-windows-agent-main"
-    $extractedDir = Get-ChildItem -Path $env:TEMP -Directory -Filter "ngx-windows-agent-*" | Select-Object -First 1
-    if (-not $extractedDir) {
-        Write-Err "Couldn't find extracted source directory in $env:TEMP"
-        exit 1
-    }
-
-    # Copy just the server/ contents and README into the install path
-    $serverSrc = Join-Path $extractedDir.FullName "server"
-    if (Test-Path $serverSrc) {
-        Copy-Item -Path "$serverSrc\*" -Destination $InstallPath -Recurse -Force
-        Write-Success "Server files copied to $InstallPath"
-    } else {
-        Write-Err "Server source not found in extracted archive at $serverSrc"
-        exit 1
-    }
+    # The agent zip is flat (just the server/ contents, no top-level dir)
+    Expand-Archive -Path $sourceZip -DestinationPath $InstallPath -Force
+    Write-Success "Agent files extracted to $InstallPath"
 } catch {
     Write-Err "Extraction failed: $_"
     exit 1
 } finally {
-    # Clean up
     Remove-Item $sourceZip -Force -ErrorAction SilentlyContinue
-    if ($extractedDir) {
-        Remove-Item $extractedDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-    }
 }
+
 
 # ---------- Install Python dependencies ----------
 Write-Step "Installing Python dependencies..."
