@@ -137,11 +137,16 @@ Write-Step "Downloading agent code ($Version)..."
 # Default to the public installer repo
 $PublicInstallerRepo = if ($GitHubRepo) { $GitHubRepo } else { "NexGenX/ngx-windows-agent-installer" }
 
-# Resolve the version we're installing
+# Map requested version to the actual published version.
+# For now there's only one release shipped; later this would be a lookup.
 $resolvedVersion = if ($Version -eq "latest") { "v1.0.0" } else { $Version }
+$PublishedVersion = "v1.0.0"  # bump this in lockstep with releases/vX.Y.Z/ngx-agent.zip
 
-# Build the public download URL
-$sourceUrl = "https://github.com/$PublicInstallerRepo/releases/download/$resolvedVersion/ngx-agent.zip"
+# Build the public download URL.
+# We download directly from raw.githubusercontent.com (the file's git path)
+# rather than the GitHub Releases API. This is simpler — no releases to
+# manage — and works as long as the file exists at releases/$PublishedVersion/ngx-agent.zip.
+$sourceUrl = "https://raw.githubusercontent.com/$PublicInstallerRepo/main/releases/$PublishedVersion/ngx-agent.zip"
 $sourceZip = "$env:TEMP\ngx-agent.zip"
 
 Write-Step "Downloading from $sourceUrl..."
@@ -151,7 +156,7 @@ try {
     Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceZip -UseBasicParsing -TimeoutSec 120 -DisableKeepAlive
     $actualSize = (Get-Item $sourceZip).Length
     if ($actualSize -lt 1000) {
-        Write-Err "Downloaded file is too small ($actualSize bytes). Check that $resolvedVersion is a valid release."
+        Write-Err "Downloaded file is too small ($actualSize bytes). Check that the file exists at $sourceUrl"
         exit 1
     }
     Write-Success "Downloaded $actualSize bytes"
@@ -165,9 +170,9 @@ try {
 # Optional SHA-256 verification
 if (-not $SkipChecksum) {
     $expectedHash = $null
-    $hashUrl = "https://raw.githubusercontent.com/$PublicInstallerRepo/main/releases/$resolvedVersion/ngx-agent.zip.sha256"
+    $hashUrl = "https://raw.githubusercontent.com/$PublicInstallerRepo/main/releases/$PublishedVersion/ngx-agent.zip.sha256"
     try {
-        $expectedHash = (Invoke-RestMethod -Uri $hashUrl -UseBasicParsing -TimeoutSec 10).Trim().Split(' ')[0]
+        $expectedHash = (Invoke-RestMethod -Uri $hashUrl -UseBasicParsing -TimeoutSec 10 -DisableKeepAlive).Trim().Split(' ')[0]
         if ($expectedHash -and $expectedHash.Length -eq 64) {
             Write-Step "Verifying SHA-256 checksum..."
             $actualHash = (Get-FileHash -Path $sourceZip -Algorithm SHA256).Hash.ToLower()
