@@ -1,187 +1,110 @@
-# NexGenX Windows Agent
+# NexGenX Windows Agent — Public Installer
 
-**A secure, access-code-protected Windows control server** — the desktop-side component for the NexGenX AI Employee platform. Runs on a Windows VM and exposes screenshot, mouse, keyboard, and accessibility tree APIs to the Linux AI gateway.
+**The one-liner installer for the NexGenX Windows Agent.**
 
----
-
-## Architecture
-
-```
-┌─────────────────────────┐          ┌─────────────────────────┐
-│   Windows VM            │          │   Linux LXC             │
-│   (customer's desktop)  │          │   (NexGenX datacenter)  │
-│                         │   API    │                         │
-│  ┌───────────────────┐  │ ─────── │  ┌──────────────────┐   │
-│  │ agent_server.py   │◄─┤  HTTPS  ├─►│ windows_agent.py│   │
-│  │ (FastAPI, :9400)  │  │ X-Auth  │  │  (AI client)     │   │
-│  └───────────────────┘  │ Code    │  └────────┬─────────┘   │
-│  ┌───────────────────┐  │          │           │             │
-│  │ noVNC (:6080)     │  │          │     AI model (me)      │
-│  │ (browser access)  │  │          │                         │
-│  └───────────────────┘  │          │                         │
-└─────────────────────────┘          └─────────────────────────┘
-```
-
-**Two modes:**
-- `agent_server.py` — Headless API server (for automated AI control)
-- `tray_app.py` — System tray UI (shows access code, status, config)
+This repository is **public** so customers can install without needing GitHub credentials.
 
 ---
 
-## Installation on Windows VM
+## Quick install (one-liner, as Administrator)
 
-### Option A: One-click install (recommended)
-```
-1. Copy the entire `server/` folder to the Windows VM
-2. Right-click `install.ps1` → "Run with PowerShell" → "Run as Administrator"
-3. Done. The access code appears in a Windows notification.
-```
+Open **PowerShell as Administrator** and paste:
 
-### Option B: Manual install
 ```powershell
-# Install Python 3.11+ from python.org (check "Add to PATH")
-# Then:
-cd C:\NexGenX
-pip install -r requirements.txt
-python agent_server.py
+iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1)
 ```
 
----
+That's it. The bootstrap will:
+1. Download the real installer (this repo's `server/install.ps1`)
+2. Run it, which:
+   - Installs Python 3.11 if needed
+   - Configures WinRM, RDP, and the firewall for remote administration
+   - Downloads the agent code from the **private** `NexGenX/ngx-windows-agent` repo
+   - Installs Python dependencies
+   - Sets up the auto-start scheduled task
+   - Starts the agent and displays the access code
 
-## Access Code System
+## What gets installed
 
-On first run, the server **generates a 16-character hex access code** (e.g. `fb5337fda3ab6c84`).
+- **Python 3.11** (system-wide, from python.org)
+- **NexGenX Agent** at `C:\NexGenX` (or your chosen `-InstallPath`)
+- **Windows Scheduled Task** `NexGenXAgent` that starts the agent on boot
+- **Windows Firewall rule** allowing TCP 9400 inbound (the agent's HTTP port)
+- **noVNC** in `C:\NexGenX\noVNC` for browser-based desktop access
+- **WinRM** enabled on port 5985
+- **RDP** enabled on port 3389 (Network Level Authentication disabled so noVNC can connect)
+- **Access code** persisted to `C:\ProgramData\NexGenX\agent_access.txt`
 
-**Where it's stored:**
-- `C:\ProgramData\NexGenX\agent_access.txt` — the plain code
-- `C:\ProgramData\NexGenX\agent_access_hash.txt` — SHA-256 hash for verification
+## Advanced usage
 
-**How it works:**
-- Every API call requires the header `X-Access-Code: <code>`
-- Invalid/missing code → HTTP 401
-- The code is shown in a Windows toast notification on first start
-- Retrieve it anytime from `C:\ProgramData\NexGenX\agent_access.txt`
-
-**Sharing with the AI gateway:**
-```bash
-# On Linux gateway — set env vars:
-export WINDOWS_AGENT_URL="http://192.168.10.209:9400"
-export WINDOWS_AGENT_CODE="fb5337fda3ab6c84"
-```
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `GET` | `/ping` | No | Health check |
-| `GET` | `/access_code` | No | Get masked code info |
-| `GET` | `/screenshot` | Yes | Full screen PNG |
-| `POST` | `/click?x=&y=&button=` | Yes | Click at x,y |
-| `POST` | `/doubleclick?x=&y=` | Yes | Double click |
-| `POST` | `/move?x=&y=` | Yes | Move mouse |
-| `POST` | `/type?text=` | Yes | Type text |
-| `POST` | `/key?key=` | Yes | Single key press |
-| `POST` | `/hotkey?key1=&key2=` | Yes | Key combo |
-| `POST` | `/scroll?clicks=&x=&y=` | Yes | Mouse scroll |
-| `GET` | `/tree?depth=` | Yes | Full accessibility tree |
-| `GET` | `/tree/clickable` | Yes | Only interactive elements |
-| `GET` | `/find?text=` | Yes | Find element by text → x,y |
-| `GET` | `/window/list` | Yes | List open windows |
-| `GET` | `/info` | Yes | System info (screen size, etc.) |
-| `GET` | `/vnc` | Yes | Check noVNC status |
-| `POST` | `/access_code/reset` | Yes | Reset access code |
-
----
-
-## Linux Client Usage
-
-```python
-from windows_agent import WindowsAgent
-
-agent = WindowsAgent("192.168.10.209", "fb5337fda3ab6c84")
-
-# Or from environment:
-# agent = WindowsAgent.from_env()
-
-# Take screenshot
-img = agent.screenshot()
-img.save("/tmp/desktop.png")
-
-# Find and click a button by its label text
-el = agent.find("Submit")
-if el:
-    agent.click(el.x, el.y)
-
-# Get all clickable elements
-elements = agent.clickable()
-for el in elements:
-    print(f"[{el.type}] {el.name} at ({el.x}, {el.y})")
-
-# High-level: wait for element
-el = agent.wait_for_element("Loading...", timeout=10)
-```
-
----
-
-## noVNC — Browser Desktop Access
-
-The Windows VM also runs noVNC so customers can view their desktop in a browser:
-
-```
-http://<windows-vm-ip>:6080/vnc.html
-```
-
-The portal embeds this via iframe. No VPN, no RDP client — pure HTML5.
-
-To install noVNC manually:
 ```powershell
-# On the Windows VM:
-git clone https://github.com/novnc/noVNC.git C:\NexGenX\noVNC
-# Then run: websockify --web C:\NexGenX\noVNC 6080 localhost:5900
+# Custom install path
+iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1); .\install.ps1 -InstallPath 'D:\Agents\MyWorker'
+
+# Specific version
+iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.0/install-bootstrap.ps1)
+
+# Skip Python install (if you already have 3.10+)
+.\install.ps1 -SkipPythonInstall
+
+# Skip SHA-256 checksum verification (NOT recommended for production)
+.\install.ps1 -SkipChecksum
 ```
 
----
+## After install
 
-## Auto-start on Boot
+The agent listens on **port 9400** (HTTP). The access code is shown in a Windows notification and saved to:
 
-The installer creates a Windows Scheduled Task (`NexGenXAgent`) that runs as Administrator at startup. To verify:
-```powershell
-Get-ScheduledTask -TaskName NexGenXAgent
+```
+C:\ProgramData\NexGenX\agent_access.txt
 ```
 
----
+Share the access code with the NexGenX AI gateway to control this machine:
 
-## Security Notes
+- **HTTP API:** `http://<this-machine-ip>:9400` (with `X-Access-Code` header)
+- **API docs:** `http://<this-machine-ip>:9400/docs`
+- **Browser-based desktop (noVNC):** `http://<this-machine-ip>:6080/vnc.html`
 
-- Access code is stored as SHA-256 hash on disk (plain text also stored for user retrieval)
-- API requires `X-Access-Code` header on every mutating request
-- Firewall rule opens port 9400 inbound — restrict to NexGenX gateway IPs in production
-- For production: add TLS (run behind nginx with HTTPS) and restrict `/access_code` endpoint
-- noVNC websocket should be behind auth or restricted to portal proxy only
+## Files in this repo
 
----
+| File | Purpose |
+|------|---------|
+| `install-bootstrap.ps1` | Tiny one-liner launcher (~3 KB). The thing customers actually run. |
+| `server/install.ps1` | The full installer. Downloads agent code, sets up firewall, scheduled task, etc. |
+| `README.md` | This file. |
+| `DEPLOYMENT.md` | How the agent is distributed and how customer installs work at scale. |
+
+## The agent source
+
+The full agent source code lives in a **separate private repo** (`NexGenX/ngx-windows-agent`) that the installer pulls from. This public repo is **just the installer scripts** — no agent code, no secrets, no customer data.
+
+This split lets us:
+- ✅ Give customers a clean one-liner that doesn't require GitHub credentials
+- ✅ Keep proprietary agent code private
+- ✅ Update the installer without touching the agent source
+- ✅ Pin specific customer installs to specific installer versions
 
 ## Troubleshooting
 
-**Server won't start:**
+**"Execution of scripts is disabled on this system"** — Run this first:
 ```powershell
-python agent_server.py  # Run manually to see errors
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1)
 ```
 
-**Access code not found:**
-```powershell
-Get-Content C:\ProgramData\NexGenX\agent_access.txt
-```
+**"Failed to download installer"** — Check internet connectivity and that `raw.githubusercontent.com` is reachable.
 
-**Firewall blocking:**
+**Agent installs but you can't connect to port 9400** — Check the Windows Firewall:
 ```powershell
-New-NetFirewallRule -DisplayName "NexGenX Agent" -Direction Inbound -Protocol TCP -LocalPort 9400 -Action Allow
+Get-NetFirewallRule -DisplayName "NexGenX Agent Server"
 ```
+If missing, re-run the installer (it's idempotent).
 
-**pyautogui fails (remote desktop context):**
-pyautogui needs a real display session. If running on a headless Server VM, it may not work via RDP. Use:
-```powershell
-# Install a virtual display driver or use Agent with RDP disconnected
-```
+**Where do I find the access code?** — Three places:
+1. Windows notification at install time
+2. `C:\ProgramData\NexGenX\agent_access.txt`
+3. The agent generates a new one each time it starts — check the log at `C:\NexGenX\agent.log`
+
+## License
+
+Proprietary — © NexGenX. Not for redistribution.
