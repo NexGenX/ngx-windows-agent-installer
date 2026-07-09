@@ -525,6 +525,62 @@ def install_routes(app, agent):
                 "ocr_lines_sample": lines4[:500]}
 
     # ─── /exec: run a PowerShell command (P0: eliminates WinRM dependency) ──
+    @router.post("/paste")
+    async def paste_text(
+        request: Request,
+        text: str = "",
+        x_access_code: Optional[str] = Header(None),
+    ):
+        """Paste text via clipboard injection. Much faster and more reliable
+        than /type for long text (500+ chars). Uses PowerShell to set the
+        clipboard, then Ctrl+V to paste into the focused field.
+
+        This fixes the X.com compose box truncation issue where pyautogui.write()
+        drops characters because X.com's React handler can't keep up with
+        sustained keystroke events.
+        """
+        _check(x_access_code)
+        if not text:
+            return {"ok": True, "chars": 0, "method": "paste", "detail": "empty"}
+
+        # Escape single quotes for PowerShell (double them)
+        ps_text = text.replace("'", "''")
+
+        # Set clipboard via PowerShell (async to avoid blocking the event loop)
+        import asyncio
+        ps_cmd = f"Set-Clipboard -Value '{ps_text}'"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+            if proc.returncode != 0:
+                return {"ok": False, "error": f"clipboard set failed: {stderr.decode()[:200]}"}
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "clipboard set timed out"}
+        except Exception as e:
+            return {"ok": False, "error": f"clipboard exception: {e}"}
+
+        # Small delay for clipboard to settle
+        await asyncio.sleep(0.1)
+
+        # Ctrl+V to paste
+        import pyautogui
+        pyautogui.hotkey("ctrl", "v")
+
+        # Small delay for the UI to process the paste
+        await asyncio.sleep(0.3)
+
+        agent._last_action = {
+            "endpoint": "/paste",
+            "started_at": time.time(),
+            "ok": True,
+            "detail": f"pasted {len(text)} chars via clipboard",
+        }
+        return {"ok": True, "chars": len(text), "method": "clipboard_paste"}
+
     @router.post("/exec")
     async def exec_cmd(
         request: Request,
