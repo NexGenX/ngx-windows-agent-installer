@@ -233,6 +233,31 @@ foreach ($f in $required) {
     Copy-Item -Path $src -Destination (Join-Path $InstallPath $f) -Force
     Write-Ok "Installed $f"
 }
+
+# ─── Copy skills runtime + skills directories (v1.0.9 skill API) ─────
+# The bundle includes skills_runtime/ and skills/ which are required for
+# the /skills API endpoints to register. Without these, agent_server.py
+# logs "[skills] WARNING: install failed..." and /skills returns 404.
+$skillDirs = @("skills_runtime", "skills")
+foreach ($dir in $skillDirs) {
+    $srcDir = Join-Path $payload $dir
+    $dstDir = Join-Path $InstallPath $dir
+    if (-not (Test-Path $srcDir)) {
+        Write-Err "Bundle missing required directory: $dir (skills API will not work without it)"
+    }
+    if (Test-Path $dstDir) { Remove-Item $dstDir -Recurse -Force }
+    Copy-Item -Path $srcDir -Destination $dstDir -Recurse -Force
+    $fileCount = (Get-ChildItem -Path $dstDir -Recurse -File).Count
+    Write-Ok "Installed $dir/ ($fileCount files)"
+}
+
+# Also copy tray_app.py if present (system tray integration)
+$traySrc = Join-Path $payload "tray_app.py"
+if (Test-Path $traySrc) {
+    Copy-Item -Path $traySrc -Destination (Join-Path $InstallPath "tray_app.py") -Force
+    Write-Ok "Installed tray_app.py"
+}
+
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 Remove-Item $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -345,6 +370,15 @@ if (Test-Path $codeFile) {
             Write-Ok "/screenshot OK ($($shot.RawContentLength) bytes)"
         }
     } catch { Write-Warn "/screenshot failed (no interactive desktop yet?): $_" }
+    # Verify skills API
+    try {
+        $skillsResp = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/skills" -Headers $headers -UseBasicParsing -TimeoutSec 10
+        if ($skillsResp.StatusCode -eq 200) {
+            Write-Ok "/skills API OK"
+        }
+    } catch {
+        Write-Warn "/skills not responding (may need agent restart): $_"
+    }
 } else {
     Write-Warn "Access code file missing at $codeFile"
 }
