@@ -50,6 +50,7 @@ if (-not $isAdmin) { Write-Err "Please run as Administrator" }
 
 if (-not $GitHubToken) { $GitHubToken = $env:NEXGENX_GITHUB_TOKEN }
 if (-not $GitHubToken) { $GitHubToken = $env:GITHUB_TOKEN }
+if (-not $BundleUrl) { $BundleUrl = $env:NEXGENX_BUNDLE_URL }
 
 function Get-PythonExe {
     $candidates = @(
