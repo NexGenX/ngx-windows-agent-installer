@@ -1,41 +1,45 @@
-# NexGenX Windows Agent — Public Bootstrap Installer
-# https://github.com/NexGenX/ngx-windows-agent-installer
+# NexGenX Windows Agent — Public Bootstrap (v1.0.8)
+# Public repo = installer scripts only. Agent source stays private.
 #
-# One-liner (as Administrator):
-#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1)
-#
-# Defaults to v1.0.7 (with OCR + vision). For v1.0.6 only:
-#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1); Install-NexGenXAgent -Version v106
+#   $env:NEXGENX_GITHUB_TOKEN = "<PAT with read access to private ngx-windows-agent releases>"
+#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.8/install-bootstrap.ps1)
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "C:\NexGenX",
-    [string]$Version = "v107"  # "v107" (default, with OCR) or "v106" (base)
+    [string]$InstallPath = "C:\NexGenX\v108",
+    [string]$Version = "v108",
+    [string]$Branch = "v1.0.8",
+    [string]$GitHubToken = "",
+    [string]$BundleUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-
 $PublicRepo = "NexGenX/ngx-windows-agent-installer"
 
 Write-Host ""
 Write-Host "  NexGenX Windows Agent Bootstrap" -ForegroundColor Cyan
 Write-Host "  ================================" -ForegroundColor Cyan
-Write-Host "  Repo:   github.com/$PublicRepo" -ForegroundColor Gray
 Write-Host "  Version: $Version" -ForegroundColor Gray
 Write-Host ""
 
-# Download and run the appropriate installer
-if ($Version -eq "v107") {
-    $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/main/server/install-v107.ps1"
+if (-not $GitHubToken) { $GitHubToken = $env:NEXGENX_GITHUB_TOKEN }
+if (-not $GitHubToken) { $GitHubToken = $env:GITHUB_TOKEN }
+
+if ($Version -eq "v108") {
+    $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/$Branch/server/install-v108.ps1"
+    $installerScript = irm $installerUrl
+    $scriptBlock = [scriptblock]::Create($installerScript)
+    & $scriptBlock -InstallPath $InstallPath -GitHubToken $GitHubToken -BundleUrl $BundleUrl
 } else {
-    $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/main/server/install-v106.ps1"
+    Write-Host "Legacy Version=$Version — use main branch installers. Prefer v108." -ForegroundColor Yellow
+    if ($Version -eq "v107") {
+        $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/main/server/install-v107.ps1"
+    } else {
+        $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/main/server/install-v106.ps1"
+    }
+    $installerScript = irm $installerUrl
+    $scriptBlock = [scriptblock]::Create($installerScript)
+    $scriptBlock.Invoke(@($InstallPath))
 }
-
-Write-Host "  Downloading installer..." -ForegroundColor Gray
-$installerScript = irm $installerUrl
-$scriptBlock = [scriptblock]::Create($installerScript)
-$scriptBlock.Invoke(@($InstallPath))
-
-Write-Host ""
-Write-Host "  Installation complete!" -ForegroundColor Green
+Write-Host "  Bootstrap finished." -ForegroundColor Green
