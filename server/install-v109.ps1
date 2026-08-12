@@ -29,7 +29,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$AgentVersion = "1.0.8"
+$AgentVersion = "1.0.9"
 $TaskName = "NexGenXAgent"
 $OldTaskNames = @("NexGenXAgent", "NexGenXAgent-v106")
 
@@ -262,7 +262,12 @@ if ($conn) {
     if ($proc) {
         Write-Ok "Listener PID=$($proc.Id) SessionId=$($proc.SessionId)"
         if ($proc.SessionId -eq 0) {
-            Write-Err "Agent is in Session 0. Use Start-ScheduledTask -TaskName $TaskName while a user is logged on."
+            # RMM / remote upgrades often start the task before an interactive user exists.
+            # Files + task are installed; desktop skills need a real logon session.
+            Write-Warn "Agent is in Session 0 (no interactive desktop yet). After a user logs on, run: Start-ScheduledTask -TaskName $TaskName"
+            if (-not $Upgrade) {
+                Write-Err "Agent is in Session 0. Use Start-ScheduledTask -TaskName $TaskName while a user is logged on."
+            }
         }
     }
 }
@@ -301,3 +306,4 @@ Write-Host "  Task:  $TaskName" -ForegroundColor Gray
 Write-Host "  Files: $InstallPath" -ForegroundColor Gray
 Write-Host "  Never start with Start-Process — use Start-ScheduledTask." -ForegroundColor Yellow
 Write-Host ""
+
