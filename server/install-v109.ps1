@@ -31,7 +31,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $AgentVersion = "1.0.9"
 $TaskName = "NexGenXAgent"
-$OldTaskNames = @("NexGenXAgent", "NexGenXAgent-v106")
+$OldTaskNames = @("NexGenXAgent", "NexGenXAgent-v106", "NexGenXAgent-v107", "NexGenXAgent-v108")
 
 function Write-Step($msg) { Write-Host ""; Write-Host "  $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    [+] $msg" -ForegroundColor Green }
@@ -104,22 +104,71 @@ if (-not $pyExe) {
 }
 Write-Ok "Using Python: $pyExe"
 
-# ─── Stop old tasks ───────────────────────────────────────────────────
-Write-Step "Stopping previous agent tasks..."
-foreach ($tn in $OldTaskNames) {
+# ─── Stop ALL previous agents (tasks / services / PIDs on $Port) ───────
+# Upgrades used to only stop NexGenXAgent + NexGenXAgent-v106. Leftover
+# v1.0.7 tasks/services could reclaim :9400 after reboot and shadow v1.0.9.
+Write-Step "Stopping previous agent tasks, services, and listeners..."
+
+# 1) Stop + unregister every scheduled task that looks like ours
+$taskMatches = @()
+$taskMatches += $OldTaskNames
+Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+    $_.TaskName -match 'NexGen' -or
+    ($_.Actions.Execute -match 'NexGenX|agent_supervisor|agent_server') -or
+    ($_.Actions.Arguments -match 'NexGenX|agent_supervisor|agent_server')
+} | ForEach-Object { $taskMatches += $_.TaskName }
+$taskMatches = $taskMatches | Select-Object -Unique
+foreach ($tn in $taskMatches) {
     $t = Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
-    if ($t) {
-        try { Stop-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue } catch {}
-        Write-Ok "Stopped task $tn"
+    if (-not $t) { continue }
+    try { Stop-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue } catch {}
+    Write-Ok "Stopped task $tn"
+    # Keep the canonical task name for re-register below; remove legacy names now
+    if ($tn -ne $TaskName) {
+        try {
+            Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Ok "Unregistered legacy task $tn"
+        } catch {}
     }
 }
-Start-Sleep -Seconds 2
+
+# 2) Stop Windows services if any were ever registered
+Get-Service -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -match 'NexGen' -or $_.DisplayName -match 'NexGen'
+} | ForEach-Object {
+    try {
+        if ($_.Status -ne 'Stopped') { Stop-Service -Name $_.Name -Force -ErrorAction SilentlyContinue }
+        Write-Ok "Stopped service $($_.Name)"
+    } catch {}
+}
+
+# 3) Kill anything listening on the agent port (any process name)
+Start-Sleep -Seconds 1
 Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
     $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-    if ($proc -and $proc.ProcessName -match "python") {
-        Write-Warn "Killing orphan python pid=$($proc.Id) on port $Port"
-        try { Stop-Process -Id $proc.Id -Force } catch {}
+    if ($proc) {
+        Write-Warn "Killing listener pid=$($proc.Id) ($($proc.ProcessName)) on port $Port"
+        try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
     }
+}
+
+# 4) Kill leftover agent processes by command line (old install paths)
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -and (
+        $_.CommandLine -match 'NexGenX\\.*(agent_server|agent_supervisor|agent_watchdog)' -or
+        $_.CommandLine -match 'C:\\NexGenX\\.*(agent_server|agent_supervisor)' 
+    )
+} | ForEach-Object {
+    Write-Warn "Killing leftover agent pid=$($_.ProcessId) ($($_.Name))"
+    try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+}
+
+Start-Sleep -Seconds 2
+$still = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+if ($still) {
+    Write-Warn "Port $Port still in use after cleanup — upgrade will continue; verify listener after start"
+} else {
+    Write-Ok "Port $Port is free"
 }
 
 # ─── Download PRIVATE agent bundle ────────────────────────────────────
