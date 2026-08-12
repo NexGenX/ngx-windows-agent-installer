@@ -23,7 +23,8 @@ param(
     [string]$BundleUrl = "",
     [string]$GitHubToken = "",
     [int]$Port = 9400,
-    [switch]$Upgrade
+    [switch]$Upgrade,
+    [switch]$SkipPythonInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,9 +66,42 @@ function Get-PythonExe {
     foreach ($c in $candidates) {
         if ($c -and (Test-Path $c)) { return $c }
     }
-    Write-Err "No python.exe found. Install Python 3.11+ first."
+    return $null
 }
+
+function Install-Python311 {
+    Write-Step "Python not found. Downloading Python 3.11..."
+    $pythonUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+    $installer = "$env:TEMP\python-3.11.9-amd64.exe"
+    try {
+        Invoke-WebRequest -Uri $pythonUrl -OutFile $installer -UseBasicParsing -TimeoutSec 180
+    } catch {
+        Write-Err "Failed to download Python. Install Python 3.11+ manually from python.org"
+    }
+    Write-Step "Installing Python (this may take a minute)..."
+    $proc = Start-Process -FilePath $installer -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_pip=1" -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Err "Python installer exited with code $($proc.ExitCode)"
+    }
+    # Refresh PATH for this process
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    Start-Sleep -Seconds 2
+    Remove-Item $installer -Force -ErrorAction SilentlyContinue
+    $found = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+    foreach ($c in @("C:\Python311\python.exe", "C:\Program Files\Python311\python.exe")) {
+        if (Test-Path $c) { return $c }
+    }
+    Write-Err "Python installed but python.exe not found on PATH. Open a new Admin PowerShell and re-run."
+}
+
 $pyExe = Get-PythonExe
+if (-not $pyExe) {
+    if ($SkipPythonInstall) {
+        Write-Err "No python.exe found and -SkipPythonInstall was set."
+    }
+    $pyExe = Install-Python311
+}
 Write-Ok "Using Python: $pyExe"
 
 # ─── Stop old tasks ───────────────────────────────────────────────────
