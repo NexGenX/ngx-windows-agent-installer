@@ -1,13 +1,12 @@
-# NexGenX Windows Agent — Upgrade to v1.0.8
-# Public installer only; agent bundle from private release.
+# NexGenX Windows Agent — Upgrade to v1.0.9
 #
 #   $env:NEXGENX_GITHUB_TOKEN = "<PAT>"
-#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.8/upgrade-bootstrap.ps1)
+#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.9/upgrade-bootstrap.ps1)
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "C:\NexGenX\v108",
-    [string]$Branch = "v1.0.8",
+    [string]$InstallPath = "C:\NexGenX\v109",
+    [string]$Branch = "v1.0.9",
     [string]$GitHubToken = "",
     [string]$BundleUrl = ""
 )
@@ -19,10 +18,10 @@ if (-not $GitHubToken) { $GitHubToken = $env:NEXGENX_GITHUB_TOKEN }
 if (-not $GitHubToken) { $GitHubToken = $env:GITHUB_TOKEN }
 
 Write-Host ""
-Write-Host "  NexGenX Agent Upgrade → v1.0.8" -ForegroundColor Cyan
+Write-Host "  NexGenX Agent Upgrade → v1.0.9" -ForegroundColor Cyan
 Write-Host ""
 
-$installerUrl = "https://raw.githubusercontent.com/$PublicRepo/$Branch/server/install-v108.ps1"
+$installerUrl = "https://raw.githubusercontent.com/$PublicRepo/$Branch/server/install-v109.ps1"
 $installerScript = irm $installerUrl
 $scriptBlock = [scriptblock]::Create($installerScript)
 & $scriptBlock -InstallPath $InstallPath -Upgrade -GitHubToken $GitHubToken -BundleUrl $BundleUrl
