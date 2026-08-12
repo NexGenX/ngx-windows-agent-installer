@@ -1,0 +1,19 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+python-multipart==0.0.9
+pyautogui==0.9.54
+Pillow==10.4.0
+numpy==1.26.4
+mss==9.0.1
+pystray==0.19.5
+pyperclip==1.8.2
+cryptography==43.0.0
+uiautomation==2.0.29
+pywin32==306; sys_platform == 'win32'
+
+# v107/v108 Windows OCR packages
+winrt-runtime>=2.0.0; sys_platform == 'win32'
+winrt-Windows.Media.Ocr>=2.0.0; sys_platform == 'win32'
+winrt-Windows.Globalization>=2.0.0; sys_platform == 'win32'
+winrt-Windows.Graphics.Imaging>=2.0.0; sys_platform == 'win32'
+winrt-Windows.Storage.Streams>=2.0.0; sys_platform == 'win32'

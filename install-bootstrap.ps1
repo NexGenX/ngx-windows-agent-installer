@@ -1,41 +1,47 @@
-# NexGenX Windows Agent — Public Bootstrap Installer
+# NexGenX Windows Agent — Public Bootstrap (v1.0.8)
 # https://github.com/NexGenX/ngx-windows-agent-installer
 #
-# One-liner (as Administrator):
-#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1)
+# Install (Administrator PowerShell):
+#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.8/install-bootstrap.ps1)
 #
-# Defaults to v1.0.7 (with OCR + vision). For v1.0.6 only:
-#   iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1); Install-NexGenXAgent -Version v106
+# Optional: -Version v107 or v106 for older installers on main.
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "C:\NexGenX",
-    [string]$Version = "v107"  # "v107" (default, with OCR) or "v106" (base)
+    [string]$InstallPath = "",
+    [string]$Version = "v108",
+    [string]$Branch = "v1.0.8"
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-
 $PublicRepo = "NexGenX/ngx-windows-agent-installer"
 
 Write-Host ""
 Write-Host "  NexGenX Windows Agent Bootstrap" -ForegroundColor Cyan
 Write-Host "  ================================" -ForegroundColor Cyan
-Write-Host "  Repo:   github.com/$PublicRepo" -ForegroundColor Gray
 Write-Host "  Version: $Version" -ForegroundColor Gray
 Write-Host ""
 
-# Download and run the appropriate installer
-if ($Version -eq "v107") {
+if ($Version -eq "v108") {
+    if (-not $InstallPath) { $InstallPath = "C:\NexGenX\v108" }
+    $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/$Branch/server/install-v108.ps1"
+    $installerScript = irm $installerUrl
+    $scriptBlock = [scriptblock]::Create($installerScript)
+    & $scriptBlock -InstallPath $InstallPath
+} elseif ($Version -eq "v107") {
+    if (-not $InstallPath) { $InstallPath = "C:\NexGenX\v106" }
     $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/main/server/install-v107.ps1"
+    $installerScript = irm $installerUrl
+    $scriptBlock = [scriptblock]::Create($installerScript)
+    $scriptBlock.Invoke(@($InstallPath))
 } else {
+    if (-not $InstallPath) { $InstallPath = "C:\NexGenX\v106" }
     $installerUrl = "https://raw.githubusercontent.com/$PublicRepo/main/server/install-v106.ps1"
+    $installerScript = irm $installerUrl
+    $scriptBlock = [scriptblock]::Create($installerScript)
+    $scriptBlock.Invoke(@($InstallPath))
 }
 
-Write-Host "  Downloading installer..." -ForegroundColor Gray
-$installerScript = irm $installerUrl
-$scriptBlock = [scriptblock]::Create($installerScript)
-$scriptBlock.Invoke(@($InstallPath))
-
 Write-Host ""
-Write-Host "  Installation complete!" -ForegroundColor Green
+Write-Host "  Bootstrap finished." -ForegroundColor Green
