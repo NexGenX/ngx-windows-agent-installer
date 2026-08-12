@@ -1,52 +1,61 @@
 # NexGenX Windows Agent — Public Installer
 
-One-liner install and upgrade for the NexGenX / NexLink Windows Agent.
+**This repository is installer scripts only.**  
+Agent source code lives in the private repo `NexGenX/ngx-windows-agent` and is distributed as a **private GitHub Release** zip.
 
-## Install (new machine)
-
-Open **PowerShell as Administrator**:
+## Install (Administrator PowerShell)
 
 ```powershell
+$env:NEXGENX_GITHUB_TOKEN = "<fine-grained PAT: Contents read on NexGenX/ngx-windows-agent>"
 iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.8/install-bootstrap.ps1)
 ```
 
-## Upgrade (existing machine)
+## Upgrade
 
 ```powershell
+$env:NEXGENX_GITHUB_TOKEN = "<PAT>"
 iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.8/upgrade-bootstrap.ps1)
 ```
 
-Upgrade keeps the access code in `C:\ProgramData\NexGenX\`, replaces agent files with **v1.0.8**, and restarts via the Interactive scheduled task.
+### Internal CDN (no GitHub token on the endpoint)
+
+```powershell
+iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/v1.0.8/install-bootstrap.ps1); `
+  # or call install-v108 with -BundleUrl "https://your-cdn/ngx-agent-v1.0.8.zip"
+```
+
+Pass `-BundleUrl` into the bootstrap once wired, or run `server/install-v108.ps1` locally with `-BundleUrl`.
 
 ## What v1.0.8 fixes
 
-- **One version everywhere** — `/info` and `/health` both report `1.0.8` (plus `v107: true` for OCR).
-- **Session-safe start** — agent starts with `Start-ScheduledTask` on task `NexGenXAgent` (Interactive + AtLogOn). Never use bare `Start-Process` for the long-running agent (that puts it in Session 0; `/ping` works but `/screenshot` fails).
-- **Post-checks** — installer fails if `/ping` fails, Session is 0, or version/health is wrong.
+- One version string (`1.0.8`) on `/info` and `/health`
+- Session-safe start: Interactive scheduled task `NexGenXAgent` + `Start-ScheduledTask` (never bare `Start-Process`)
+- Installer post-checks: `/ping`, Session ≠ 0, health/version, screenshot smoke
+- **No agent source in this public git tree**
 
 ## After install
 
-- API: `http://<ip>:9400` with header `X-Access-Code`
+- API: `http://<ip>:9400` with `X-Access-Code`
 - Access code: `C:\ProgramData\NexGenX\agent_access.txt`
 - Files: `C:\NexGenX\v108`
 - Task: `NexGenXAgent`
-- Logs: `C:\ProgramData\NexGenX\supervisor.log`
 
 ## If screenshots fail
 
-1. Check session: `Get-Process python | Select Id,SessionId`
-2. If SessionId is `0`, stop it and run:
-   ```powershell
-   Start-ScheduledTask -TaskName NexGenXAgent
-   ```
-3. Do **not** use `Start-Process python ... agent_server.py` for recovery.
-
-## Older versions
-
 ```powershell
-# v1.0.7 path (legacy)
-iex (irm https://raw.githubusercontent.com/NexGenX/ngx-windows-agent-installer/main/install-bootstrap.ps1)
+Get-Process python | Select Id, SessionId
+Start-ScheduledTask -TaskName NexGenXAgent
 ```
+
+Do **not** recover with `Start-Process`.
+
+## Publishing a new agent bundle (maintainers)
+
+From the private repo CI or a trusted machine:
+
+1. Build `ngx-agent-vX.Y.Z.zip` from private `server/` (+ vision modules)
+2. `gh release create vX.Y.Z ngx-agent-vX.Y.Z.zip --repo NexGenX/ngx-windows-agent`
+3. Bump public installer scripts to that tag/asset name
 
 ## License
 
